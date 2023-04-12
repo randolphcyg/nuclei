@@ -5,13 +5,26 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/projectdiscovery/nuclei/v2/pkg/catalog/disk"
 	"github.com/projectdiscovery/nuclei/v2/pkg/catalog/loader/filter"
 	"github.com/projectdiscovery/nuclei/v2/pkg/model"
 	"github.com/projectdiscovery/nuclei/v2/pkg/model/types/stringslice"
 	"github.com/projectdiscovery/nuclei/v2/pkg/templates"
-	"github.com/stretchr/testify/require"
 )
+
+var path = "./CVE-2021-3129.yaml"
+
+func TestCheckTpl(t *testing.T) {
+	catalog := disk.NewCatalog("")
+	tagFilter, _ := filter.New(&filter.Config{})
+	success, err := LoadTemplate(path, tagFilter, nil, catalog)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(success)
+}
 
 func TestLoadTemplate(t *testing.T) {
 	catalog := disk.NewCatalog("")

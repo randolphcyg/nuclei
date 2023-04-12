@@ -5,6 +5,10 @@ import (
 	"encoding/json"
 
 	validate "github.com/go-playground/validator/v10"
+	errorutil "github.com/projectdiscovery/utils/errors"
+	"go.uber.org/multierr"
+	"gopkg.in/yaml.v2"
+
 	"github.com/projectdiscovery/nuclei/v2/pkg/model"
 	"github.com/projectdiscovery/nuclei/v2/pkg/protocols"
 	"github.com/projectdiscovery/nuclei/v2/pkg/protocols/common/variables"
@@ -18,9 +22,6 @@ import (
 	"github.com/projectdiscovery/nuclei/v2/pkg/protocols/whois"
 	"github.com/projectdiscovery/nuclei/v2/pkg/templates/types"
 	"github.com/projectdiscovery/nuclei/v2/pkg/workflows"
-	errorutil "github.com/projectdiscovery/utils/errors"
-	"go.uber.org/multierr"
-	"gopkg.in/yaml.v2"
 )
 
 // Template is a YAML input file which defines all the requests and
@@ -122,6 +123,21 @@ type Template struct {
 
 	// Verified defines if the template signature is digitally verified
 	Verified bool `yaml:"-" json:"-"`
+
+	ExploitSteps []struct {
+		Relationship string
+		Request      struct {
+			Method         string `yaml:"method,omitempty" json:"method,omitempty"`
+			Uri            string `yaml:"uri,omitempty" json:"uri,omitempty"`
+			FollowRedirect bool   `yaml:"follow_redirect,omitempty" json:"follow_redirect,omitempty"`
+			Header         struct {
+				Cookie string `yaml:"cookie,omitempty" json:"cookie,omitempty"`
+			} `yaml:"header,omitempty" json:"header,omitempty"`
+			DataType string `yaml:"data_type,omitempty" json:"data_type,omitempty"`
+			Data     string `yaml:"data,omitempty" json:"data,omitempty"`
+		} `yaml:"request,omitempty" json:"request,omitempty"`
+		SetVariable []string `yaml:"setVariable,omitempty" json:"setVariable,omitempty"`
+	} `yaml:"exploitSteps,omitempty" json:"exploitSteps,omitempty"`
 }
 
 // TemplateProtocols is a list of accepted template protocols
