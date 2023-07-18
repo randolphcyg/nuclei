@@ -7,11 +7,13 @@ import (
 	"strings"
 
 	"github.com/projectdiscovery/nuclei/v2/pkg/output"
+	"github.com/projectdiscovery/nuclei/v2/pkg/reporting/exporters/markdown/util"
 	"github.com/projectdiscovery/nuclei/v2/pkg/reporting/format"
 	stringsutil "github.com/projectdiscovery/utils/strings"
 )
 
 const indexFileName = "index.md"
+const extension = ".md"
 
 type Exporter struct {
 	directory string
@@ -21,7 +23,8 @@ type Exporter struct {
 // Options contains the configuration options for GitHub issue tracker client
 type Options struct {
 	// Directory is the directory to export found results to
-	Directory string `yaml:"directory"`
+	Directory         string `yaml:"directory"`
+	IncludeRawPayload bool   `yaml:"include-raw-payload"`
 }
 
 // New creates a new markdown exporter integration client based on options.
@@ -37,9 +40,7 @@ func New(options *Options) (*Exporter, error) {
 	_ = os.MkdirAll(directory, 0755)
 
 	// index generation header
-	dataHeader := "" +
-		"|Hostname/IP|Finding|Severity|\n" +
-		"|-|-|-|\n"
+	dataHeader := util.CreateTableHeader("Hostname/IP", "Finding", "Severity")
 
 	err := os.WriteFile(filepath.Join(directory, indexFileName), []byte(dataHeader), 0644)
 	if err != nil {
@@ -51,9 +52,43 @@ func New(options *Options) (*Exporter, error) {
 
 // Export exports a passed result event to markdown
 func (exporter *Exporter) Export(event *output.ResultEvent) error {
-	summary := format.Summary(event)
-	description := format.MarkdownDescription(event)
+	// If the IncludeRawPayload is not set, then set the request and response to an empty string in the event to avoid
+	// writing them to the list of events.
+	// This will reduce the amount of storage as well as the fields being excluded from the markdown report output since
+	// the property is set to "omitempty"
+	if !exporter.options.IncludeRawPayload {
+		event.Request = ""
+		event.Response = ""
+	}
 
+	// index file generation
+	file, err := os.OpenFile(filepath.Join(exporter.directory, indexFileName), os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	filename := createFileName(event)
+	host := util.CreateLink(event.Host, filename)
+	finding := event.TemplateID + " " + event.MatcherName
+	severity := event.Info.SeverityHolder.Severity.String()
+
+	_, err = file.WriteString(util.CreateTableRow(host, finding, severity))
+	if err != nil {
+		return err
+	}
+
+	dataBuilder := &bytes.Buffer{}
+	dataBuilder.WriteString(util.CreateHeading3(format.Summary(event)))
+	dataBuilder.WriteString("\n")
+	dataBuilder.WriteString(util.CreateHorizontalLine())
+	dataBuilder.WriteString(format.CreateReportDescription(event, util.MarkdownFormatter{}))
+	data := dataBuilder.Bytes()
+
+	return os.WriteFile(filepath.Join(exporter.directory, filename), data, 0644)
+}
+
+func createFileName(event *output.ResultEvent) string {
 	filenameBuilder := &strings.Builder{}
 	filenameBuilder.WriteString(event.TemplateID)
 	filenameBuilder.WriteString("-")
@@ -69,29 +104,8 @@ func (exporter *Exporter) Export(event *output.ResultEvent) error {
 		filenameBuilder.WriteRune('-')
 		filenameBuilder.WriteString(event.MatcherName)
 	}
-	filenameBuilder.WriteString(".md")
-	finalFilename := sanitizeFilename(filenameBuilder.String())
-
-	dataBuilder := &bytes.Buffer{}
-	dataBuilder.WriteString("### ")
-	dataBuilder.WriteString(summary)
-	dataBuilder.WriteString("\n---\n")
-	dataBuilder.WriteString(description)
-	data := dataBuilder.Bytes()
-
-	// index generation
-	file, err := os.OpenFile(filepath.Join(exporter.directory, indexFileName), os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	_, err = file.WriteString("|[" + event.Host + "](" + finalFilename + ")" + "|" + event.TemplateID + " " + event.MatcherName + "|" + event.Info.SeverityHolder.Severity.String() + "|\n")
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(filepath.Join(exporter.directory, finalFilename), data, 0644)
+	filenameBuilder.WriteString(extension)
+	return sanitizeFilename(filenameBuilder.String())
 }
 
 // Close closes the exporter after operation

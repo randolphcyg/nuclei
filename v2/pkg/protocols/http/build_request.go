@@ -65,7 +65,7 @@ func (r *requestGenerator) Total() int {
 }
 
 // Make creates a http request for the provided input.
-// It returns io.EOF as error when all the requests have been exhausted.
+// It returns ErrNoMoreRequests as error when all the requests have been exhausted.
 func (r *requestGenerator) Make(ctx context.Context, input *contextargs.Context, reqData string, payloads, dynamicValues map[string]interface{}) (*generatedRequest, error) {
 	// value of `reqData` depends on the type of request specified in template
 	// 1. If request is raw request =  reqData contains raw request (i.e http request dump)
@@ -112,7 +112,7 @@ func (r *requestGenerator) Make(ctx context.Context, input *contextargs.Context,
 		r.interactshURLs = append(r.interactshURLs, interactURLs...)
 	}
 	// allVars contains all variables from all sources
-	allVars := generators.MergeMaps(dynamicValues, defaultReqVars, optionVars, variablesMap)
+	allVars := generators.MergeMaps(dynamicValues, defaultReqVars, optionVars, variablesMap, r.options.Constants)
 
 	// Evaluate payload variables
 	// eg: payload variables can be username: jon.doe@{{Hostname}}
@@ -149,7 +149,7 @@ func (r *requestGenerator) Make(ctx context.Context, input *contextargs.Context,
 	}
 	// while merging parameters first preference is given to target params
 	finalparams := parsed.Params
-	finalparams.Merge(reqURL.Params)
+	finalparams.Merge(reqURL.Params.Encode())
 	reqURL.Params = finalparams
 	return r.generateHttpRequest(ctx, reqURL, finalVars, payloads)
 }
@@ -170,10 +170,10 @@ func (r *requestGenerator) makeSelfContainedRequest(ctx context.Context, data st
 
 	signerVars := GetDefaultSignerVars(r.request.Signature.Value)
 	// this will ensure that default signer variables are overwritten by other variables
-	values = generators.MergeMaps(signerVars, values)
+	values = generators.MergeMaps(signerVars, values, r.options.Constants)
 
 	// priority of variables is as follows (from low to high) for self contained templates
-	// default signer vars < variables <  cli vars  < payload < dynamic values
+	// default signer vars < variables <  cli vars  < payload < dynamic values < constants
 
 	// evaluate request
 	data, err := expressions.Evaluate(data, values)
@@ -264,7 +264,7 @@ func (r *requestGenerator) generateRawRequest(ctx context.Context, rawRequest st
 		// in self contained requests baseURL is extracted from raw request itself
 		rawRequestData, err = raw.ParseRawRequest(rawRequest, r.request.Unsafe)
 	} else {
-		rawRequestData, err = raw.Parse(rawRequest, baseURL, r.request.Unsafe)
+		rawRequestData, err = raw.Parse(rawRequest, baseURL, r.request.Unsafe, r.request.DisablePathAutomerge)
 	}
 	if err != nil {
 		return nil, errorutil.NewWithErr(err).Msgf("failed to parse raw request")

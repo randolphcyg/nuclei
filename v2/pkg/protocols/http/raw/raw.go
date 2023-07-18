@@ -26,7 +26,7 @@ type Request struct {
 }
 
 // Parse parses the raw request as supplied by the user
-func Parse(request string, inputURL *urlutil.URL, unsafe bool) (*Request, error) {
+func Parse(request string, inputURL *urlutil.URL, unsafe, disablePathAutomerge bool) (*Request, error) {
 	rawrequest, err := readRawRequest(request, unsafe)
 	if err != nil {
 		return nil, err
@@ -45,6 +45,9 @@ func Parse(request string, inputURL *urlutil.URL, unsafe bool) (*Request, error)
 			return nil, errorutil.NewWithErr(err).WithTag("raw").Msgf("failed to parse url %v from template", rawrequest.Path)
 		}
 		cloned := inputURL.Clone()
+		if disablePathAutomerge {
+			cloned.Path = ""
+		}
 		parseErr := cloned.MergePath(urlx.GetRelativePath(), true)
 		if parseErr != nil {
 			return nil, errorutil.NewWithTag("raw", "could not automergepath for template path %v", urlx.GetRelativePath()).Wrap(parseErr)
@@ -58,29 +61,36 @@ func Parse(request string, inputURL *urlutil.URL, unsafe bool) (*Request, error)
 		if (cloned.Path == "" || cloned.Path == "/") && !strings.HasPrefix(prevPath, "/") {
 			// Edgecase if raw unsafe request is
 			// GET 1337?with=param HTTP/1.1
-			if tmpurl, err := urlutil.ParseRelativePath(prevPath, true); err == nil && len(tmpurl.Params) > 0 {
+			if tmpurl, err := urlutil.ParseRelativePath(prevPath, true); err == nil && !tmpurl.Params.IsEmpty() {
 				// if raw request contains parameters
-				cloned.Params.Merge(tmpurl.Params)
+				cloned.Params.Merge(tmpurl.Params.Encode())
 				unsafeRelativePath = strings.TrimPrefix(tmpurl.Path, "/") + "?" + cloned.Params.Encode()
 			} else {
 				// if raw request does not contain param
-				if len(cloned.Params) > 0 {
+				if !cloned.Params.IsEmpty() {
 					unsafeRelativePath = prevPath + "?" + cloned.Params.Encode()
 				} else {
 					unsafeRelativePath = prevPath
 				}
 			}
 		} else {
+			if disablePathAutomerge {
+				cloned.Path = ""
+			}
 			err = cloned.MergePath(rawrequest.Path, true)
 			if err != nil {
 				return nil, errorutil.NewWithErr(err).WithTag("raw").Msgf("failed to automerge %v from unsafe template", rawrequest.Path)
 			}
 			unsafeRelativePath = cloned.GetRelativePath()
 		}
+		rawrequest.Path = cloned.GetRelativePath()
 		rawrequest.UnsafeRawBytes = bytes.Replace(rawrequest.UnsafeRawBytes, []byte(prevPath), []byte(unsafeRelativePath), 1)
 
 	default:
 		cloned := inputURL.Clone()
+		if disablePathAutomerge {
+			cloned.Path = ""
+		}
 		parseErr := cloned.MergePath(rawrequest.Path, true)
 		if parseErr != nil {
 			return nil, errorutil.NewWithTag("raw", "could not automergepath for template path %v", rawrequest.Path).Wrap(parseErr)

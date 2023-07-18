@@ -6,6 +6,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/projectdiscovery/nuclei/v2/pkg/protocols"
+	"github.com/projectdiscovery/nuclei/v2/pkg/protocols/common/contextargs"
 	"github.com/projectdiscovery/nuclei/v2/pkg/protocols/common/generators"
 	"github.com/projectdiscovery/retryablehttp-go"
 	urlutil "github.com/projectdiscovery/utils/url"
@@ -13,8 +14,8 @@ import (
 
 // ExecuteRuleInput is the input for rule Execute function
 type ExecuteRuleInput struct {
-	// URL is the URL for the request
-	URL *urlutil.URL
+	// Input is the context args input
+	Input *contextargs.Context
 	// Callback is the callback for generated rule requests
 	Callback func(GeneratedRequest) bool
 	// InteractURLs contains interact urls for execute call
@@ -41,13 +42,13 @@ type GeneratedRequest struct {
 // Input is not thread safe and should not be shared between concurrent
 // goroutines.
 func (rule *Rule) Execute(input *ExecuteRuleInput) error {
-	if !rule.isExecutable(input.URL) {
+	if !rule.isExecutable(input.Input) {
 		return nil
 	}
 	baseValues := input.Values
 	if rule.generator == nil {
 		evaluatedValues, interactURLs := rule.options.Variables.EvaluateWithInteractsh(baseValues, rule.options.Interactsh)
-		input.Values = generators.MergeMaps(evaluatedValues, baseValues)
+		input.Values = generators.MergeMaps(evaluatedValues, baseValues, rule.options.Constants)
 		input.InteractURLs = interactURLs
 		err := rule.executeRuleValues(input)
 		return err
@@ -60,7 +61,7 @@ func (rule *Rule) Execute(input *ExecuteRuleInput) error {
 		}
 		evaluatedValues, interactURLs := rule.options.Variables.EvaluateWithInteractsh(generators.MergeMaps(values, baseValues), rule.options.Interactsh)
 		input.InteractURLs = interactURLs
-		input.Values = generators.MergeMaps(values, evaluatedValues, baseValues)
+		input.Values = generators.MergeMaps(values, evaluatedValues, baseValues, rule.options.Constants)
 
 		if err := rule.executeRuleValues(input); err != nil {
 			return err
@@ -69,8 +70,12 @@ func (rule *Rule) Execute(input *ExecuteRuleInput) error {
 }
 
 // isExecutable returns true if the rule can be executed based on provided input
-func (rule *Rule) isExecutable(parsed *urlutil.URL) bool {
-	if len(parsed.Query()) > 0 && rule.partType == queryPartType {
+func (rule *Rule) isExecutable(input *contextargs.Context) bool {
+	parsed, err := urlutil.Parse(input.MetaInput.Input)
+	if err != nil {
+		return false
+	}
+	if !parsed.Query().IsEmpty() && rule.partType == queryPartType {
 		return true
 	}
 	return false
@@ -87,7 +92,7 @@ func (rule *Rule) executeRuleValues(input *ExecuteRuleInput) error {
 }
 
 // Compile compiles a fuzzing rule and initializes it for operation
-func (rule *Rule) Compile(generator *generators.PayloadGenerator, options *protocols.ExecuterOptions) error {
+func (rule *Rule) Compile(generator *generators.PayloadGenerator, options *protocols.ExecutorOptions) error {
 	// If a payload generator is specified from base request, use it
 	// for payload values.
 	if generator != nil {

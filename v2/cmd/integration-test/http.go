@@ -77,6 +77,9 @@ var httpTestcases = map[string]testutils.TestCase{
 	"http/cl-body-without-header.yaml":              &httpCLBodyWithoutHeader{},
 	"http/cl-body-with-header.yaml":                 &httpCLBodyWithHeader{},
 	"http/save-extractor-values-to-file.yaml":       &httpSaveExtractorValuesToFile{},
+	"http/cli-with-constants.yaml":                  &ConstantWithCliVar{},
+	"http/matcher-status.yaml":                      &matcherStatusTest{},
+	"http/disable-path-automerge.yaml":              &httpDisablePathAutomerge{},
 }
 
 type httpInteractshRequest struct{}
@@ -359,7 +362,7 @@ func (h *httpDSLFunctions) Execute(filePath string) error {
 	resultPart = stringsutil.TrimPrefixAny(resultPart, "/", " ", "[")
 
 	extracted := strings.Split(resultPart, ",")
-	numberOfDslFunctions := 87
+	numberOfDslFunctions := 88
 	if len(extracted) != numberOfDslFunctions {
 		return errors.New("incorrect number of results")
 	}
@@ -1402,4 +1405,59 @@ func (h *httpSaveExtractorValuesToFile) Execute(filePath string) error {
 		_ = os.Remove("output.txt")
 	}
 	return expectResultsCount(results, 1)
+}
+
+// constant shouldn't be overwritten by cli var with same name
+type ConstantWithCliVar struct{}
+
+// Execute executes a test case and returns an error if occurred
+func (h *ConstantWithCliVar) Execute(filePath string) error {
+	router := httprouter.New()
+	router.GET("/", func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		fmt.Fprint(w, r.URL.Query().Get("p"))
+	})
+	ts := httptest.NewTLSServer(router)
+	defer ts.Close()
+
+	got, err := testutils.RunNucleiTemplateAndGetResults(filePath, ts.URL, debug, "-V", "test=fromcli")
+	if err != nil {
+		return err
+	}
+	return expectResultsCount(got, 1)
+}
+
+type matcherStatusTest struct{}
+
+// Execute executes a test case and returns an error if occurred
+func (h *matcherStatusTest) Execute(filePath string) error {
+	router := httprouter.New()
+	router.GET("/200", func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		w.WriteHeader(http.StatusOK)
+	})
+	ts := httptest.NewServer(router)
+	defer ts.Close()
+
+	results, err := testutils.RunNucleiTemplateAndGetResults(filePath, ts.URL, debug, "-ms")
+	if err != nil {
+		return err
+	}
+	return expectResultsCount(results, 1)
+}
+
+// disable path automerge in raw request
+type httpDisablePathAutomerge struct{}
+
+// Execute executes a test case and returns an error if occurred
+func (h *httpDisablePathAutomerge) Execute(filePath string) error {
+	router := httprouter.New()
+	router.GET("/api/v1/test", func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		fmt.Fprint(w, r.URL.Query().Get("id"))
+	})
+	ts := httptest.NewServer(router)
+	defer ts.Close()
+	got, err := testutils.RunNucleiTemplateAndGetResults(filePath, ts.URL+"/api/v1/user", debug)
+	if err != nil {
+		return err
+	}
+	return expectResultsCount(got, 1)
 }

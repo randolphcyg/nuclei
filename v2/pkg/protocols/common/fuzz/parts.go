@@ -2,14 +2,15 @@ package fuzz
 
 import (
 	"context"
-	"io"
 	"net/http"
 	"strings"
 
 	"github.com/corpix/uarand"
 	"github.com/projectdiscovery/nuclei/v2/pkg/protocols/common/expressions"
 	"github.com/projectdiscovery/nuclei/v2/pkg/protocols/common/generators"
+	"github.com/projectdiscovery/nuclei/v2/pkg/types"
 	"github.com/projectdiscovery/retryablehttp-go"
+	sliceutil "github.com/projectdiscovery/utils/slice"
 	urlutil "github.com/projectdiscovery/utils/url"
 )
 
@@ -24,33 +25,37 @@ func (rule *Rule) executePartRule(input *ExecuteRuleInput, payload string) error
 
 // executeQueryPartRule executes query part rules
 func (rule *Rule) executeQueryPartRule(input *ExecuteRuleInput, payload string) error {
-	requestURL := input.URL.Clone()
-	temp := urlutil.Params{}
-	for k, v := range input.URL.Query() {
-		// this has to be a deep copy
-		x := []string{}
-		x = append(x, v...)
-		temp[k] = x
+	requestURL, err := urlutil.Parse(input.Input.MetaInput.Input)
+	if err != nil {
+		return err
 	}
+	origRequestURL := requestURL.Clone()
+	// clone the params to avoid modifying the original
+	temp := origRequestURL.Params.Clone()
 
-	for key, values := range input.URL.Query() {
+	origRequestURL.Query().Iterate(func(key string, values []string) bool {
+		cloned := sliceutil.Clone(values)
 		for i, value := range values {
 			if !rule.matchKeyOrValue(key, value) {
 				continue
 			}
 			var evaluated string
 			evaluated, input.InteractURLs = rule.executeEvaluate(input, key, value, payload, input.InteractURLs)
-			temp[key][i] = evaluated
+			cloned[i] = evaluated
 
 			if rule.modeType == singleModeType {
+				temp.Update(key, cloned)
 				requestURL.Params = temp
-				if err := rule.buildQueryInput(input, requestURL, input.InteractURLs); err != nil {
-					return err
+				if qerr := rule.buildQueryInput(input, requestURL, input.InteractURLs); qerr != nil {
+					err = qerr
+					return false
 				}
-				temp[key][i] = value // change back to previous value for temp
+				cloned[i] = value // change back to previous value for temp
 			}
 		}
-	}
+		temp.Update(key, cloned)
+		return true
+	})
 
 	if rule.modeType == multipleModeType {
 		requestURL.Params = temp
@@ -58,7 +63,8 @@ func (rule *Rule) executeQueryPartRule(input *ExecuteRuleInput, payload string) 
 			return err
 		}
 	}
-	return nil
+
+	return err
 }
 
 // buildQueryInput returns created request for a Query Input
@@ -73,10 +79,7 @@ func (rule *Rule) buildQueryInput(input *ExecuteRuleInput, parsed *urlutil.URL, 
 		req.Header.Set("User-Agent", uarand.GetRandom())
 	} else {
 		req = input.BaseRequest.Clone(context.TODO())
-		//TODO: abstract below 3 lines with `req.UpdateURL(xx *urlutil.URL)`
-		req.URL = parsed
-		req.Request.URL = parsed.URL
-		req.Update()
+		req.SetURL(parsed)
 	}
 	request := GeneratedRequest{
 		Request:       req,
@@ -84,7 +87,7 @@ func (rule *Rule) buildQueryInput(input *ExecuteRuleInput, parsed *urlutil.URL, 
 		DynamicValues: input.Values,
 	}
 	if !input.Callback(request) {
-		return io.EOF
+		return types.ErrNoMoreRequests
 	}
 	return nil
 }
